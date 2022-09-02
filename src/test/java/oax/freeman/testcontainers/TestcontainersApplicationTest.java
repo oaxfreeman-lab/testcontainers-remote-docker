@@ -53,7 +53,7 @@ class TestcontainersApplicationTest extends TestInfrastructure {
         // When
         messaging.subscribe(receivedMessage::set);
         messaging.emit(sentMessage);
-        
+
         messaging.messageSource().filter(msg -> msg.getPayload().getMessage().equals("First Message!")).blockFirst();
 
         // Then
@@ -85,9 +85,6 @@ class TestcontainersApplicationTest extends TestInfrastructure {
         assertThat(rabbitmqContainer.isRunning()).isTrue();
         assertThat(postgreSQLContainer.isRunning()).isTrue();
 
-        AtomicInteger incomingMessageCounter = new AtomicInteger();
-        Sinks.Many<Integer> waitForMessages = Sinks.many().multicast().onBackpressureBuffer();
-
         // Given
         List<Message<SimpleMessage>> sentMessages = Arrays
                 .stream(new String[]{
@@ -101,8 +98,6 @@ class TestcontainersApplicationTest extends TestInfrastructure {
             incomingMessage.setMessage(message.getPayload().getMessage());
             incomingMessage.setType(INCOMING);
             messageRepository.save(incomingMessage);
-
-            waitForMessages.tryEmitNext(incomingMessageCounter.incrementAndGet());
         });
 
         // When
