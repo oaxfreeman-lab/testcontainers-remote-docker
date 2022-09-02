@@ -11,9 +11,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.test.context.ActiveProfiles;
+import reactor.core.publisher.Sinks;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
@@ -49,9 +51,10 @@ class TestcontainersApplicationTest extends TestInfrastructure {
         AtomicReference<Message<SimpleMessage>> receivedMessage = new AtomicReference<>();
 
         // When
-        messaging.onMessage(receivedMessage::set);
-        messaging.sendMessage(sentMessage);
-        Thread.sleep(2000); // Messaging delay
+        messaging.subscribe(receivedMessage::set);
+        messaging.emit(sentMessage);
+        
+        messaging.messageSource().filter(msg -> msg.getPayload().getMessage().equals("First Message!")).blockFirst();
 
         // Then
         assertThat(receivedMessage.get().getPayload().getMessage()).isEqualTo(sentMessage.getPayload().getMessage());
@@ -82,6 +85,9 @@ class TestcontainersApplicationTest extends TestInfrastructure {
         assertThat(rabbitmqContainer.isRunning()).isTrue();
         assertThat(postgreSQLContainer.isRunning()).isTrue();
 
+        AtomicInteger incomingMessageCounter = new AtomicInteger();
+        Sinks.Many<Integer> waitForMessages = Sinks.many().multicast().onBackpressureBuffer();
+
         // Given
         List<Message<SimpleMessage>> sentMessages = Arrays
                 .stream(new String[]{
@@ -90,16 +96,20 @@ class TestcontainersApplicationTest extends TestInfrastructure {
                 .map(msg -> MessageBuilder.withPayload(new SimpleMessage(msg)).build())
                 .collect(Collectors.toList());
 
-        messaging.onMessage(message -> {
+        messaging.subscribe(message -> {
             MessageEntity incomingMessage = new MessageEntity();
             incomingMessage.setMessage(message.getPayload().getMessage());
             incomingMessage.setType(INCOMING);
             messageRepository.save(incomingMessage);
+
+            waitForMessages.tryEmitNext(incomingMessageCounter.incrementAndGet());
         });
 
         // When
-        sentMessages.forEach(messaging::sendMessage);
-        Thread.sleep(2000); // Messaging delay
+        sentMessages.forEach(messaging::emit);
+
+        messaging.messageSource().filter(msg -> msg.getPayload().getMessage().equals("Message 4")).blockFirst();
+
         List<MessageEntity> messagesSavedFromRabbit = messageRepository.findByType(INCOMING);
 
         // Then
